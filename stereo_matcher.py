@@ -1,18 +1,14 @@
-#!/usr/bin/env python3
-#!/usr/bin/env python2
 #!/usr/bin/python
 
-import wrapt
 import numpy as np
 import cv2
 import os
 from tabulate import tabulate
-from ast import literal_eval
 import open3d as o3d
 import argparse
 from itertools import permutations
-import zipfile
-import tarfile
+from utility import utility
+from pretrained_models import super_glue
 
 np.set_printoptions(suppress=True)
 
@@ -45,114 +41,7 @@ class CommandLine(argparse.ArgumentParser):
         self.parser.add_argument('-comp', dest='comp', help="Defines if the features obtained in task 1 are to be compared with learnable features from the SuperGlue model. Default is false.", type=bool, action='store_true', default=False)
 
     def parse_args(self):
-        return self.parser.parse_args()
-
-# Utility functions
-class utility(object):
-    def check_directory(function):
-        def check(path, *args, **kwargs):
-            if os.path.isfile(path):
-                if tarfile.is_tarfile(path):
-                    if path.endswith("tar.gz"):
-                        with tarfile.open(path, "r:gz") as tar_ref:
-                            tar_ref.extractall(IMG_DIR)
-                    elif path.endswith("tar"):
-                        with tarfile.open(path, "r:") as tar_ref:
-                            tar_ref.extractall(IMG_DIR)
-                elif zipfile.is_zipfile(path):
-                    with zipfile.ZipFile(path, 'r') as zip_ref: 
-                        # TODO CHOOSE DIR TO UNZIP
-                        zip_ref.extractall(IMG_DIR)
-            if not os.path.isfile(path) and not os.path.isdir(path):
-                os.makedirs(path)       
-            return(path, args, kwargs)
-        return check(function)
-
-
-    def check_extension(extensions):
-        @wrapt.decorator
-        def wrapper(function, instance, *args, **kwargs):
-            assert "extension" in kwargs
-            assert kwargs['extension'] in extensions
-            return function(*args, **kwargs)
-        return wrapper
-
-
-    @check_directory
-    def load_images_from_dir(path):
-        img_list = []
-        for file in os.listdir(path):
-            img = cv2.imread(os.path.join(path, file), cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                img_list.append(img)
-        if len(img_list) < 2:
-            raise Exception("At least 2 images are required for the computations.")
-        return img_list
-
-
-    @check_directory
-    def load_intrinsic_params_from_txt(path, filename):
-        counter = 0
-        result = ""
-        with open("{}{}.txt".format(path, filename), 'r') as f:
-            for line in f:
-                counter += line.count('[')
-                if counter > 0:
-                    result += line.rstrip()
-                    counter -= line.count(']')
-                else:
-                    next
-        return np.array(literal_eval(result))
-
-
-    @check_directory
-    @check_extension(extensions=['jpg, jpeg, png, txt, numpy, ply'])
-    def write_data_to_file(path, filename, data, extension):
-        if extension == 'numpy':
-            file_path = path + filename + '{}' + '.txt'
-        else:
-            file_path = path + filename + '{}' + '.' + extension 
-        counter = 0
-        while os.path.isfile(file_path.format(counter)):
-            counter += 1
-
-        if extension in ['jpg', 'jpeg', 'png']:
-            cv2.imwrite(file_path.format(counter), data)
-        elif extension == 'numpy':
-            np.savetxt(file_path, data)
-        elif extension == 'txt':
-            with open(file_path.format(counter), 'w') as outfile:
-                outfile.write(data)   
-        elif extension == 'ply':
-            o3d.io.write_point_cloud(file_path, data)    
-
-
-# Functions to obtain results from pretrained models
-class pretrained_model(object):
-    def obtain_results_from_super_glue(img_dir, sg_dir, out_dir, res_dir, max_length=1, outdoor=True, return_results=True):
-        def load_super_glue_results_from_npz(directory):
-            for file in os.listdir(directory):
-                if not file.endswith('.npz'):
-                    next
-                else:
-                    npz = np.load("{}{}".format(directory, file))
-                    kp1 = npz['keypoints0'].shape[0]
-                    kp2 = npz['keypoints1'].shape[0]
-                    matches = np.sum(npz['matches'] > -1)
-                    return (kp1, kp2, matches)
-    
-        # Obtain features using SuperGlue model from the given images
-        weights = 'outdoor' if outdoor else 'indoor'
-        os.system(f"cp -r {img_dir} {sg_dir + img_dir}")
-        os.chdir(f'{sg_dir}')
-        os.system(f"./match_pairs.py --input_dir='{img_dir}' --output_dir='{out_dir}' --max_length={max_length} --superglue='{weights}' --viz")
-        os.system(f"rm -r {img_dir}")
-        os.chdir('../')
-        os.system(f'mv {sg_dir + out_dir} {res_dir + out_dir}')
-        if return_results:
-            return load_super_glue_results_from_npz(res_dir + out_dir)
-        else:
-            return
+        return self.parser.parse_args()    
         
 
 def task_1_feature_extraction(image_pair, alg='sift', ratio=0.7, k=2, viz=True, comp=False):
@@ -203,7 +92,7 @@ def task_1_feature_extraction(image_pair, alg='sift', ratio=0.7, k=2, viz=True, 
         
     # Compare with results obtained from SuperGlue model and write to file
     if comp == True:
-        sg_kp1, sg_kp2, sg_matches = pretrained_model.obtain_results_from_super_glue(SG_IMG_DIR, SG_DIR, SG_RES_DIR, RES_DIR)
+        sg_kp1, sg_kp2, sg_matches = super_glue.obtain_results_from_super_glue(SG_IMG_DIR, SG_DIR, SG_RES_DIR, RES_DIR)
         sift_ratio = len(symmetric_matches) / (len(kp1) + len(kp2))
         sg_ratio = sg_matches / (sg_kp1 + sg_kp2)
         results = [['Method', f'Keypoints Image 1', f'Keypoints Image 2', 'Matches', 'Matches/Keypoints'],
