@@ -1,1 +1,1 @@
-# StereoMatcher
+# StructureFromMotion
